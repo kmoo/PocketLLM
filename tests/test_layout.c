@@ -79,6 +79,40 @@ int main(void) {
             check(hit, msg);
         }
 
+        /* The stop button must not sit where the send key is.
+         *
+         * This is a regression test with a scar. "stop" used to be the whole
+         * bottom strip of the generating screen, and the keyboard's send key
+         * is at the bottom of the keyboard -- so the tap that sent a message
+         * was still in the event queue when generation began, was read as a
+         * stop, and killed the reply after four tokens. What came back was the
+         * model's first few words, which for a small model restate the
+         * question: it looked like the thing was parroting you.
+         *
+         * Two other fixes cover this now (the queue is drained, and stop is
+         * ignored for the first moments), but the layouts must not collide in
+         * the first place. */
+        for (int y = 0; y < pl_screen_h; y += 2)
+            for (int x = 0; x < pl_screen_w; x += 2)
+                if (pl_keyboard_hit(x, y, 0, 0) == '\n' && pl_hit_stop(x, y)) {
+                    char msg[96];
+                    snprintf(msg, sizeof msg,
+                             "%s: stop overlaps the send key at %d,%d",
+                             PANELS[p].name, x, y);
+                    check(0, msg);
+                    y = pl_screen_h;
+                    break;
+                }
+
+        /* And stop must exist at all, or a slow reply cannot be abandoned. */
+        {
+            int found = 0;
+            for (int y = 0; y < pl_screen_h && !found; y += 3)
+                for (int x = 0; x < pl_screen_w && !found; x += 3)
+                    if (pl_hit_stop(x, y)) found = 1;
+            check(found, "stop is reachable");
+        }
+
         /* The chrome must not overlap: a tap that both closes the app and
          * opens the keyboard does whichever the code tests first, which is a
          * coin toss the user always loses. */

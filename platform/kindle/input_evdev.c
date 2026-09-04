@@ -110,6 +110,21 @@ static void to_screen(pl_input *in, int rx, int ry, int *ox, int *oy) {
     if (*oy < 0) *oy = 0; if (*oy >= in->screen_h) *oy = in->screen_h - 1;
 }
 
+size_t pl_input_drain(pl_input *in) {
+    if (!in) return 0;
+    size_t dropped = 0;
+    /* Bounded: a stuck device must not turn this into a spin. */
+    for (int i = 0; i < 256; i++) {
+        pl_event ev = pl_input_next(in, 0);
+        if (ev.kind == PL_EV_NONE) break;
+        dropped++;
+    }
+    /* A finger still down has no completed gesture to report, but leaving the
+     * flag set would pair it with the next release and invent a tap. */
+    in->down = in->pending_down = in->pending_up = 0;
+    return dropped;
+}
+
 void pl_input_close(pl_input *in) {
     if (!in) return;
     if (in->fd >= 0) close(in->fd);

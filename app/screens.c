@@ -110,9 +110,28 @@ int pl_hit_scroll(int x, int y) {
     return y < (TOP_H + PL_SCREEN_H - COMPOSER_H) / 2 ? -1 : 1;
 }
 
+/* Stop is a drawn button, not "the bottom of the screen".
+ *
+ * It used to be the whole bottom strip -- which is also where the keyboard's
+ * send key sits, so the tap that started a reply could arrive again and cancel
+ * it. The queue is drained now and there is a grace period besides, but a hit
+ * target that matches the thing on screen is the honest version regardless:
+ * nobody expects the empty space beside a button to be part of it. */
+static pl_rect stop_button(void) {
+    /* Hard left, because the send key is hard right. The generating strip and
+     * the keyboard's bottom row occupy the same band of the screen -- there is
+     * no vertical daylight between them -- so the separation has to be
+     * horizontal. tests/test_layout.c holds them apart. */
+    int h = SMIN(64, 48), w = S(200);
+    pl_rect r = { PAD, PL_SCREEN_H - COMPOSER_H / 2 - h / 2, w, h };
+    return r;
+}
+
 int pl_hit_stop(int x, int y) {
-    (void)x;
-    return y >= PL_SCREEN_H - COMPOSER_H;
+    pl_rect r = stop_button();
+    int pad = S(20);
+    return x >= r.x - pad && x < r.x + r.w + pad
+        && y >= r.y - pad && y < r.y + r.h + pad;
 }
 
 /* The height of the conversation area, so the caller can page by screenfuls
@@ -211,14 +230,23 @@ void pl_screen_chat(pl_ui *ui, const pl_message *msgs, size_t n,
     }
 
     if (busy) {
-        /* While generating, the composer becomes progress plus a way out. Half
-         * a minute of an unchanging screen reads as a crash on a device with
-         * no spinner of its own, so the dots walk. */
+        /* While generating, the composer becomes a way out plus progress. */
         int cy = PL_SCREEN_H - COMPOSER_H;
         pl_rect strip = { 0, cy, PL_SCREEN_W, COMPOSER_H };
         pl_ui_fill(ui, strip, WHITE);
         pl_ui_hline(ui, 0, cy, PL_SCREEN_W, RULE);
-        int dx = PAD, dy = cy + COMPOSER_H / 2;
+        int dy = cy + COMPOSER_H / 2;
+
+        pl_rect sb = stop_button();
+        pl_ui_round_rect(ui, sb, sb.h / 2, 2, 0x9A, 0);
+        const char *stop = "stop";
+        int sw = pl_ui_text_width(ui, PL_FONT_SANS, F_SMALL, stop);
+        pl_ui_text(ui, PL_FONT_SANS, F_SMALL, sb.x + (sb.w - sw) / 2,
+                   sb.y + sb.h / 2 + F_SMALL / 3, stop, INK);
+
+        /* The dots walk: half a minute of an unchanging screen reads as a
+         * crash on a device with no spinner of its own. */
+        int dx = sb.x + sb.w + S(40);
         static const uint8_t SHADE[3] = { 0x30, 0x88, 0xC0 };
         for (int i = 0; i < 3; i++) {
             pl_rect d = { dx, dy - S(7), S(14), S(14) };
@@ -227,10 +255,6 @@ void pl_screen_chat(pl_ui *ui, const pl_message *msgs, size_t n,
         }
         pl_ui_text(ui, PL_FONT_SANS, F_SMALL, dx + S(16), dy + F_SMALL / 3,
                    "thinking…", MID);
-        const char *stop = "stop";
-        int sw = pl_ui_text_width(ui, PL_FONT_SANS, F_SMALL, stop);
-        pl_ui_text(ui, PL_FONT_SANS, F_SMALL, PL_SCREEN_W - PAD - sw,
-                   dy + F_SMALL / 3, stop, INK);
     } else {
         composer(ui, "Type a message…");
     }

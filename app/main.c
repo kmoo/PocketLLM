@@ -126,7 +126,7 @@ typedef struct {
     const char   *model_label;
 
     /* Streaming bookkeeping. */
-    long  last_draw;
+    long  last_draw, gen_started;
     int   tick;
     int   stop_requested;
 } app;
@@ -193,19 +193,27 @@ static void draw_chat(app *a, pl_refresh how, int pin_to_end) {
 static int on_token(pl_chat *c, void *user) {
     (void)c;
     app *a = user;
+    long t = now_ms();
 
     pl_event ev = pl_input_next(a->in, 0);
     if (ev.kind == PL_EV_QUIT) { a->stop_requested = 2; return 0; }
-    if (ev.kind == PL_EV_TAP && pl_hit_stop(ev.x, ev.y)) {
+
+    /* A tap in the first moments of a reply is the tail of the tap that asked
+     * for it, not a decision to abandon it -- nobody changes their mind in
+     * half a second, and on e-ink the "stop" button has not finished being
+     * drawn yet. Together with the drain in send_message this is what stopped
+     * replies being cut off after four tokens. */
+    if (ev.kind == PL_EV_TAP && t - a->gen_started > 700
+        && pl_hit_stop(ev.x, ev.y)) {
         pl_ui_tap_flash(a->ui, ev.x, ev.y);
         a->stop_requested = 1;
+        logf_("stopped by the reader");
         return 0;
     }
 
     /* A partial refresh costs about 100 ms of panel time. Redrawing per token
      * would spend more of the budget pushing pixels than generating them, and
      * e-ink cannot show it that fast anyway. */
-    long t = now_ms();
     if (t - a->last_draw < 450) return 1;
     a->last_draw = t;
     a->tick++;
@@ -234,8 +242,13 @@ static void send_message(app *a) {
                     "tap the model name at the top to choose one that is "
                     "already here.");
     } else {
+        /* Everything queued right now is the send tap still arriving. It must
+         * not be read as a stop for the reply it just asked for. */
+        size_t stale = pl_input_drain(a->in);
+        if (stale) logf_("dropped %zu queued event(s) from the send tap", stale);
+
         a->stop_requested = 0;
-        a->last_draw = now_ms();
+        a->last_draw = a->gen_started = now_ms();
         long t0 = now_ms();
         int got = pl_chat_reply(&a->chat, on_token, a);
         long ms = now_ms() - t0;
@@ -256,6 +269,10 @@ static void send_message(app *a) {
                                      "it a different way, or start a new chat.");
     }
 
+    /* Taps that landed during a half-minute wait were aimed at a screen that
+     * no longer exists. Replaying them afterwards reopens the keyboard or
+     * jumps to the model list for no reason the reader can see. */
+    pl_input_drain(a->in);
     draw_chat(a, PL_REFRESH_FULL, 1);
 }
 

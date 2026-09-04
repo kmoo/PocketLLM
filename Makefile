@@ -34,7 +34,7 @@ PLATFORM_ARM  := platform/draw.c platform/kindle/ui_fb.c \
                  platform/kindle/input_evdev.c platform/devroot.c
 APP_SRC       := app/main.c app/chat.c app/models.c app/screens.c
 
-.PHONY: all deps test screens app app-model llama package abi ask clean
+.PHONY: all deps test screens app app-model llama package abi ask ask-arm clean
 all: test
 
 $(OUT):
@@ -145,3 +145,12 @@ ask: | $(OUT)
 	   $(HOST_LLAMA)/ggml/src/libggml-cpu.a $(HOST_LLAMA)/ggml/src/libggml-base.a \
 	   $(ASK_LDLIBS) -o $(OUT)/ask
 	@echo 'built out/ask -- try: ./out/ask dist/pocketllm/model.gguf "hello"'
+
+# The same conversation, on real 32-bit ARM, in the container. Slow and the
+# timings mean nothing -- but it is the actual code the Kindle runs, which the
+# host build is not.
+ask-arm: llama | $(OUT)
+	@$(ZIG) c++ -target $(ARM_TARGET) -mcpu=$(ARM_CPU) -O2 -static \
+	   -I$(LLAMA)/include -I$(LLAMA)/ggml/include \
+	   -o $(OUT)/ask-arm tools/ask.c app/chat.c model/model_llama.c $(LLAMA_LIBS)
+	@sh tools/check-abi.sh $(OUT)/ask-arm | tail -1

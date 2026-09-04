@@ -191,6 +191,14 @@ be reviewed as PNGs without a device.
   it that fast anyway.
 - **Big targets, and a scroll rail.** Swipes on an e-ink digitiser are
   unreliable enough that a target you cannot miss beats a scrollbar you can.
+- **A tap that starts something is still arriving while it runs.** Tapping
+  *send* left a tap queued at the bottom of the screen; the generating screen
+  put *stop* in that same place; the first poll during generation read one as
+  the other and killed the reply after four tokens. What came back was the
+  model's opening words, which for a small model restate the question — so it
+  looked like the thing was parroting you. Three fixes: drain the queue when a
+  long operation begins, ignore *stop* for the first moments, and keep the two
+  buttons at opposite ends of the screen. A test holds the last one.
 
 ## Licence
 
