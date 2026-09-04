@@ -7,7 +7,14 @@ device, and it works in aeroplane mode.
 Type or paste anything and it answers. No account, no API key, no wifi, no
 telemetry. Nothing you write leaves the Kindle.
 
-![the chat screen](docs/chat.png)
+| | |
+|:--:|:--:|
+| ![](docs/chat.png) | ![](docs/models.png) |
+| A conversation. Your side in a bubble, its side set flush in a serif, like the book the device was built for. | Every model you installed, and what each one costs you in waiting. |
+| ![](docs/keyboard-typed.png) | ![](docs/keyboard-symbols.png) |
+| Type or paste. Every key is checked by a test to be on-screen and hittable on three panel sizes. | Numbers and punctuation, because a chat app is not a search box. |
+| ![](docs/streaming.png) | ![](docs/empty.png) |
+| A reply arriving. The caret tracks the last glyph; the dots walk so a still screen never reads as a crash. | Nothing to configure, nothing to sign into, nothing leaving the device. |
 
 ## Why this is unusual
 
@@ -25,7 +32,7 @@ Measured on a 12th-generation Paperwhite, not read off a spec sheet:
 | | |
 |---|---|
 | CPU | MediaTek MT8113, two Cortex-A53 cores, **32-bit kernel** |
-| RAM | 512 MB, **no swap** |
+| RAM | 1 GB total — but ~**550 MB free** with the reader running, **no swap** |
 | Screen | 8bpp greyscale e-ink, ~100 ms partial refresh, ~500 ms full |
 | Measured | Gemma-3-270M: **5.52 tok/s** generating, 8.64 evaluating |
 
@@ -40,6 +47,12 @@ evicts weight pages — there is no swap for them to go to — so every generate
 token re-reads the model from eMMC and the whole thing runs **sixteen times
 slower**. `MemAvailable` does not move, which is how the cause was eventually
 found. One line, worth more than every other tuning decision here.
+
+The memory figure is why PocketLLM reads `/proc/meminfo` at startup rather than
+assuming: `MemTotal` on this device is 1 GB and `MemAvailable` is 550 MB,
+because the reader framework keeps running underneath. Judging a model against
+the wrong one of those two numbers is the difference between a working app and
+one killed mid-sentence.
 
 **The 32-bit kernel.** Every batched-GEMM fast path in ggml is `__aarch64__`-
 gated, so an armv7 build falls through to scalar C. That is why evaluating the
@@ -59,7 +72,30 @@ consequential thing on the device — and it is a real trade, not an obvious win
 Each row shows what it will actually cost you. The times start as estimates
 derived from the one measured point above, scaled by file size; **the first
 time a model answers on your device, its real rate replaces the estimate** and
-the row says `measured here`.
+the row says `measured here`. Whether a model fits is judged against your
+Kindle's own free memory, read at startup — so a device nobody has tested still
+gets the right answer, and one too big is greyed out rather than crashing.
+
+The five, all read side by side on the same three questions — an explanation, a
+piece of fiction, and a fact:
+
+| | size | a short reply | what it is like |
+|---|--:|--:|---|
+| **SmolLM2 135M** | 100 MB | ~8s | Quick, and readable. Gets facts right and details invented. |
+| **LFM2 350M** | 219 MB | ~13s | The best writer here, and the most confidently wrong. |
+| **Gemma 3 270M** | 241 MB | ~14s | Brief and obedient. Says little, but rarely rambles. |
+| **SmolLM2 360M** | 258 MB | ~15s | Clear explanations. Repeats whole sentences in longer answers. |
+| **Qwen2.5 0.5B** | 379 MB | ~24s | The most accurate, and the only one that stops when it is done. |
+
+Three are Apache-2.0 and download without ceremony. LFM2 and Gemma are not
+open-source licences, so the script shows you the terms and asks before it
+fetches either, and ships the required notice alongside the weights.
+
+**Not included: Qwen3-0.6B.** Same size as Qwen2.5-0.5B and a year newer, and
+it is the wrong tool here — asked for the capital of Australia it spent the
+entire token budget thinking out loud, concluded Sydney, and invented a 1935
+riot to explain why. At five tokens a second, thinking out loud is not a
+feature.
 
 The one that loads by default is the one with the most memory headroom, not the
 cleverest. A model killed for memory halfway through a reply is a worse first
@@ -71,12 +107,18 @@ list, sized and timed from its own bytes.
 
 ## Build it
 
-One script. It checks your tools, fetches everything, cross-compiles, and lays
-out a folder you copy straight onto the Kindle:
+One script. It asks which Kindle you have, checks your tools, fetches
+everything, cross-compiles, and lays out a folder you copy straight onto the
+device:
 
 ```sh
 ./build.sh
 ```
+
+It asks because what fits depends on free memory, not on the model number —
+1 GB devices take all five, 512 MB devices four, and a 256 MB Kindle only the
+smallest. Getting the answer wrong is harmless: the app re-checks on the
+device and greys out anything that will not run.
 
 ```
 dist/COPY-TO-KINDLE/
@@ -91,8 +133,10 @@ Copy those two folders onto the Kindle's drive and open KUAL. That is the whole
 installation — see [INSTALL.md](INSTALL.md).
 
 ```sh
-./build.sh all        # every model that fits on the device
-./build.sh smol360    # just one
+./build.sh 1gb        # Paperwhite 12th gen and other 1 GB devices
+./build.sh 512mb      # Paperwhite 11th gen, Oasis, Scribe
+./build.sh 256mb      # the oldest Kindles
+./build.sh smol360    # one model by name
 ./build.sh none       # the app alone
 ```
 

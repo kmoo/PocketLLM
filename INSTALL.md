@@ -28,8 +28,26 @@ cd PocketLLM
 ./build.sh
 ```
 
-That fetches the fonts and llama.cpp, cross-compiles, downloads two models
-(~650 MB), and leaves you with a folder shaped exactly like the Kindle's drive:
+It asks which Kindle you have first, because what fits depends on free memory:
+
+```
+  1)  Paperwhite 12th gen (2024), or any Kindle with 1 GB of RAM   all five
+  2)  A 512 MB Kindle -- Paperwhite 11th gen, Oasis, Scribe        four
+  3)  An older 256 MB Kindle                                       one
+  4)  Not sure -- take all five and let the device decide
+  5)  No models. Just build the app.
+```
+
+Only option 1 has been measured. Getting it wrong is harmless: PocketLLM reads
+your Kindle's actual free memory at startup and greys out anything that will
+not run.
+
+Two of the five — LFM2 and Gemma — are not under open-source licences, so the
+script shows you the terms and asks before fetching either. Declining skips
+that model and carries on.
+
+Then it fetches the fonts and llama.cpp, cross-compiles, and leaves you with a
+folder shaped exactly like the Kindle's drive:
 
 ```
 dist/COPY-TO-KINDLE/
@@ -39,15 +57,20 @@ dist/COPY-TO-KINDLE/
         pocketllm/
             pocketllm                    the app: static, 3.9 MB, no dependencies
             models/
-                SmolLM2-360M-...gguf     quick
-                Qwen2.5-0.5B-...gguf     better, slower, tight on memory
+                SmolLM2-135M-...gguf     fastest
+                LFM2-350M-...gguf        best prose
+                gemma-3-270m-...gguf     briefest
+                SmolLM2-360M-...gguf     clearest explanations
+                Qwen2.5-0.5B-...gguf     most accurate, slowest
+                GEMMA-TERMS.txt          licences that must travel with
+                LFM2-LICENCE.txt         those two models
             Literata.ttf  Inter.ttf      the typefaces
             OFL-*.txt                    their licence, which travels with them
 ```
 
-`./build.sh all` adds SmolLM2-135M as well; `./build.sh smol360` takes one;
-`./build.sh none` builds the app alone. `sh tools/fetch-models.sh --help`
-explains what each one costs in memory and in waiting.
+Non-interactively: `./build.sh 1gb`, `512mb`, `256mb`, `none`, or one model by
+name. `sh tools/fetch-models.sh --help` describes each one and what it costs
+you in memory and in waiting.
 
 ## 2. Copy it over
 
@@ -83,14 +106,20 @@ read off the eMMC. After that, tap the bar at the bottom, type, and press
 Tap the model name at the top of the screen. Every model you installed is
 listed with what it costs you:
 
-- **SmolLM2 360M** — about 15 seconds for a short reply. Loads by default,
-  because it has room to spare.
-- **Qwen2.5 0.5B** — about 25 seconds, and a noticeably better writer. Peaks
-  near 480 MB of the device's ~512 MB. It works; there is not much left over.
-- **SmolLM2 135M** — about 8 seconds. Simple answers, often wrong.
+| | a short reply | what it is like |
+|---|--:|---|
+| **SmolLM2 135M** | ~8s | Quick, and readable. Gets facts right and details invented. |
+| **LFM2 350M** | ~13s | The best writer here, and the most confidently wrong. |
+| **Gemma 3 270M** | ~14s | Brief and obedient. Says little, but rarely rambles. |
+| **SmolLM2 360M** | ~15s | Clear explanations. Repeats whole sentences in longer answers. |
+| **Qwen2.5 0.5B** | ~24s | The most accurate, and the only one that stops when it is done. |
 
-The times shown start as estimates. The first time each model answers on your
-device, the row switches to what it really did.
+The one that loads first is whichever has the most memory to spare, not the
+cleverest — a model killed mid-reply is a worse first impression than a
+slightly worse writer.
+
+The times start as estimates. **The first time each model answers on your
+device, the row switches to what it really did** and says `measured here`.
 
 Your choice is remembered across restarts. Any other `.gguf` you drop into
 `extensions/pocketllm/models/` appears in the list too, timed from its size.
@@ -110,8 +139,9 @@ cause.
 
 **It starts, then the screen goes back to your book.** The app was killed for
 memory — almost always Qwen2.5 0.5B, which runs with little to spare. Reopen
-it: PocketLLM will come back on that model, so tap the model name at the top
-and choose SmolLM2 360M instead. It is remembered from then on.
+it, tap the model name at the top, and choose a smaller one. It is remembered
+from then on. `pocketllm.log` records how much memory the device reported at
+startup, which is the first thing to check.
 
 **Replies stop mid-sentence.** That is the cap, not a crash: a reply is limited
 to about two hundred tokens so it cannot run for five minutes. Ask it to

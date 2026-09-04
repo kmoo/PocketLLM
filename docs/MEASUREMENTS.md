@@ -11,8 +11,8 @@ is named.
 |---|---|
 | SoC | MediaTek MT8113, 2× Cortex-A53 |
 | Kernel | **32-bit** (`armv7l`) |
-| RAM | 512 MB, no swap |
-| Free at launch | ~550 MB reported, ~500 MB usable in practice |
+| RAM | **1 GB** (`MemTotal: 979852 kB`), **no swap** |
+| Free at launch | **`MemAvailable: 562848 kB`** — ~550 MB, with the reader running |
 | Panel | 8bpp greyscale, controller reports `hwtcon_v2` |
 
 The 32-bit kernel is the single most consequential fact. Every accelerated
@@ -21,18 +21,28 @@ integer kernel in ggml (`i8mm`, `dotprod`, the repacked GEMM paths) is behind
 
 ## Memory
 
-| configuration | peak RSS | headroom |
+| configuration | peak RSS | headroom of the ~550 MB |
 |---|---|---|
-| Gemma-3-270M @ n_ctx 512 | 309 MB | ~200 MB |
-| Qwen2.5-0.5B @ n_ctx 512 | 452 MB | ~60 MB |
-| Qwen2.5-0.5B @ n_ctx 2048 | 470 MB | ~42 MB |
+| Gemma-3-270M @ n_ctx 512 | 309 MB | ~240 MB |
+| Qwen2.5-0.5B @ n_ctx 512 | 452 MB | ~100 MB |
+| Qwen2.5-0.5B @ n_ctx 2048 | 470 MB | ~80 MB |
+
+Under load, `MemAvailable` was watched down to a low-water mark of **238 MB**
+during a Qwen2.5-0.5B run — so the app really does take ~310 MB of what the
+device had free, and the headroom above is not theoretical.
+
+**The number that matters is `MemAvailable`, not `MemTotal`.** They differ by
+430 MB here, because the reader framework stays resident. Sizing against the
+wrong one is the difference between a working app and one killed mid-sentence,
+which is why `app/main.c` reads `/proc/meminfo` at startup instead of carrying
+a constant.
 
 KV cache costs roughly **19 KB per token**. Going from 512 to 4096 tokens of
 context moved peak RSS by 66 MB.
 
 PocketLLM ships at n_ctx 2048 — about 40 MB of KV — because a chat needs room
-for a conversation, and 42 MB of headroom was measured working rather than
-merely calculated. This is the number to lower first if the app is killed.
+for a conversation, and it was measured working rather than merely calculated.
+This is the number to lower first if the app is killed.
 
 ## Speed
 
@@ -79,19 +89,30 @@ dot before any work starts, since e-ink has no cursor and no haptics.
 
 ## Models, on this hardware
 
-| model | disk | verdict |
-|---|---|---|
-| SmolLM2-135M Q4_K_M | 110 MB | fast, and about as coherent as that implies |
-| SmolLM2-360M Q4_K_M | 270 MB | usable; short, blunt answers |
-| Gemma-3-270M-QAT | 300 MB | cannot compose — loops within a paragraph |
-| **Qwen2.5-0.5B Q4_K_M** | **384 MB** | **the default. Real sentences, holds a thread.** |
-| LFM2-350M | 280 MB | fluent and confidently wrong |
+All five read side by side on the same three prompts — explain a hash map in
+two sentences, write two sentences of fiction, name the capital of Australia:
 
-Model capacity is the ceiling, not the prompt and not the retrieval. That was
-established the hard way in the sibling project: an 11-question matrix on
-Gemma-270M returned 2 usable answers, with failures like *"Mr Darcy is a
-character that is presented as a character that is presented as a character."*
-Qwen2.5-0.5B is a different class of thing and fits, with ~42 MB to spare.
+| model | disk | what it did |
+|---|--:|---|
+| SmolLM2-135M | 100 MB | Canberra, correct. Overran "two sentences" every time, and invented a "tree data structure" inside the hash map. |
+| LFM2-350M | 219 MB | The best prose by a distance — and told us Canberra is Australia's largest city, then explained its own answer back to us. |
+| Gemma-3-270M-QAT | 241 MB | The only one that reliably stopped at two sentences. Also the thinnest. |
+| SmolLM2-360M | 258 MB | The clearest hash-map answer. Repeated a whole sentence verbatim in the fiction. |
+| **Qwen2.5-0.5B** | **379 MB** | "The capital of Australia is Canberra." Full stop. The most accurate and the most disciplined. |
+
+**Rankings do not transfer between tasks.** LFM2 was rejected in the sibling
+book-chat project as "fluent and confidently wrong" — but that task was
+answering *from supplied passages without inventing*, where fluency is a
+liability. In open chat it is the best writer of the five. A verdict earned on
+one task is not evidence about another, and every note in the picker was
+re-earned here.
+
+**Qwen3-0.6B was tested and excluded.** Same size as Qwen2.5-0.5B, a year
+newer, Apache-2.0. Asked for the capital of Australia it emitted a `<think>`
+block, reasoned its way to Sydney, invented "the 1935 Sydney riots" as the
+cause, and hit the 200-token cap before producing an answer. On a device at
+five tokens a second, a reasoning model spends the entire budget before it
+starts.
 
 ## Sampling
 

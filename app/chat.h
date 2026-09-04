@@ -10,10 +10,11 @@
 #include "ui_types.h"
 #include "../model/model.h"
 
-/* Memory is the hard limit here, not taste. The model already holds ~470 MB of
- * a 512 MB budget with no swap, so the transcript gets a fixed allocation that
- * cannot creep: exceed it and the oldest turns are dropped, which is also what
- * the context window would force a few turns later anyway. */
+/* Memory is the hard limit here, not taste. The largest model already holds
+ * ~470 MB of the ~550 MB a Paperwhite has free, with no swap, so the
+ * transcript gets a fixed allocation that cannot creep: exceed it and the
+ * oldest turns are dropped, which is what the context window would force a few
+ * turns later anyway. */
 #define PL_MAX_TURNS 64
 #define PL_TEXT_POOL (192 * 1024)
 

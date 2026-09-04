@@ -1,6 +1,7 @@
 /* app/models.h — which models are on the device, and what each one costs you.
  *
- * A Kindle has 512 MB and no swap, and generation is memory-bandwidth bound,
+ * A Kindle has a few hundred megabytes free and no swap, and generation is
+ * memory-bandwidth bound,
  * so the choice of model IS the choice between "answers in eight seconds and
  * says little" and "answers in a minute and says something". That trade is the
  * user's to make, not ours to make for them -- but they can only make it if
@@ -17,10 +18,22 @@
 
 #define PL_MAX_MODELS 12
 
+/* What the device will actually lend us, in MB -- MemAvailable, not MemTotal:
+ * the reader framework keeps running underneath and its pages are not ours.
+ * Everything about whether a model fits is judged against this.
+ *
+ * Set it from /proc/meminfo rather than assuming. Kindles differ by more than
+ * their model numbers suggest, and a device nobody has tested should still get
+ * the right answer instead of one calibrated to somebody else's. The default
+ * is the measured figure from a 12th-generation Paperwhite (~550 MB free of
+ * 1 GB, with the reader running), used only if nothing sets it. */
+void pl_models_set_budget(long available_mb);
+long pl_models_budget(void);
+
 typedef enum {
     PL_FIT_COMFORTABLE = 0,  /* room to spare                                */
     PL_FIT_TIGHT,            /* runs, with little headroom -- may be killed  */
-    PL_FIT_NO                /* will not load on 512 MB                      */
+    PL_FIT_NO                /* will not load in what this device has free   */
 } pl_fit;
 
 typedef struct {

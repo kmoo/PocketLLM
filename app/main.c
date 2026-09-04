@@ -77,6 +77,32 @@ static void install_handlers(void) {
     sigaction(SIGABRT, &sa, NULL);
 }
 
+/* What the kernel says it can still lend us, in MB.
+ *
+ * MemAvailable, not MemTotal: the reader framework is running underneath and
+ * its pages are not ours to take. On a 12th-generation Paperwhite that is
+ * ~550 MB of 1 GB -- and the gap between those two numbers is exactly why this
+ * is read rather than assumed. Returns 0 if it cannot be read, and the
+ * catalogue keeps its measured default. */
+static long available_mb(void) {
+    char pb[512];
+    FILE *f = fopen(pl_path("/proc/meminfo", pb, sizeof pb), "r");
+    if (!f) return 0;
+
+    long kb = 0, total = 0;
+    char line[256];
+    while (fgets(line, sizeof line, f)) {
+        if (sscanf(line, "MemAvailable: %ld kB", &kb) == 1) break;
+        sscanf(line, "MemTotal: %ld kB", &total);
+    }
+    fclose(f);
+
+    /* Older kernels predate MemAvailable. Half of total is a poor estimate,
+     * but it is the right side of poor: it under-promises. */
+    if (!kb && total) kb = total / 2;
+    return kb / 1024;
+}
+
 /* --- the running app ---------------------------------------------------- */
 
 typedef enum { MODE_CHAT, MODE_KEYBOARD, MODE_MODELS } mode;
@@ -108,7 +134,8 @@ typedef struct {
 /* Load one model by index, replacing whatever is loaded now.
  *
  * Closed before the new one is opened, always: two sets of weights do not fit
- * in 512 MB, and the failure mode of trying is the kernel killing the app
+ * in what a Kindle has free, and the failure mode of trying is the kernel
+ * killing the app
  * rather than an error we could report. */
 static int load_model(app *a, int idx) {
     if (a->chat.model) { pl_model_close(a->chat.model); a->chat.model = NULL; }
@@ -287,6 +314,10 @@ int main(int argc, char **argv) {
         pl_ui_destroy(a.ui);
         return 1;
     }
+
+    long mem = available_mb();
+    if (mem) pl_models_set_budget(mem);
+    logf_("memory: %ld MB available (budget %ld MB)", mem, pl_models_budget());
 
     /* What is installed, and which of them this device has actually timed. */
     char models_dir[560];

@@ -381,7 +381,8 @@ int pl_keyboard_hit(int x, int y, int shift, int page) {
 /* How many rows the panel has room for. Below this the list is truncated and
  * says so -- a model that is installed but invisible would read as a copy that
  * failed. There is no scrolling here on purpose: the list is short by
- * construction, and a device with 512 MB has room for a handful of models at
+ * construction, and a Kindle with a few hundred megabytes free has room for a
+ * handful of models at
  * most before the drive is the problem. */
 static size_t rows_shown(size_t n) {
     size_t room = (size_t)((PL_SCREEN_H - S(120) - ROWS_TOP) / ROW_H);

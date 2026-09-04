@@ -15,10 +15,13 @@
  * and one measured point fixes the constant.
  *
  * The measured point is Gemma-3-270M-QAT on a 12th-generation Paperwhite:
- * 5.52 tokens/second generating, 8.64 evaluating the prompt, 309 MB resident.
- * Taking ~70 MB of that as runtime overhead puts the weights at ~239 MB, so
+ * 5.52 tokens/second generating, 8.64 evaluating the prompt. Its file is
+ * 253,115,488 bytes -- 241 MB, weighed rather than inferred -- so
  *
- *     effective bandwidth ~= 5.52 * 239 MB ~= 1320 MB/s
+ *     effective bandwidth ~= 5.52 * 241 MB ~= 1330 MB/s
+ *
+ * (309 MB resident against 241 MB of weights is also where the ~70 MB runtime
+ * overhead below comes from, so the two estimates share one measurement.)
  *
  * Below about 130 MB the model stops being the bottleneck and two A53 cores
  * become one, and there is no measurement out there -- so the rate is capped
@@ -26,7 +29,7 @@
  *
  * All of this is replaced by the real rate the moment a model has generated
  * anything on this particular device. See pl_models_record_speed. */
-#define BANDWIDTH_MB   1320
+#define BANDWIDTH_MB   1330
 #define TG_CAP_X100    1000   /* 10 tok/s */
 #define PP_RATIO_X100   157   /* 8.64 / 5.52, measured                      */
 #define PP_CAP_X100    1600
@@ -35,8 +38,26 @@
  * n_ctx 2048 (measured at ~19 KB per token). Checked against Qwen2.5-0.5B:
  * predicts 480 MB, measured 470 MB. */
 #define OVERHEAD_MB     100
-#define TIGHT_MB        420
-#define CEILING_MB      500
+
+/* Headroom kept back from MemAvailable. The reader framework is still running
+ * and still allocating; taking every last megabyte is how an app gets killed
+ * two minutes in rather than refusing to start. RESERVE is what a model must
+ * leave spare to be called comfortable, MARGIN the least it may leave at all. */
+#define RESERVE_MB      120
+#define MARGIN_MB        30
+
+/* Measured on a 12th-generation Paperwhite: 979,852 kB total, ~550 MB
+ * available with the reader running, zero swap. Only a fallback -- the app
+ * reads the real figure at startup. */
+static long g_budget_mb = 550;
+
+void pl_models_set_budget(long available_mb) {
+    /* A number small enough to fail everything is more likely a parse failure
+     * than a real device, and silently listing nothing would be a mystery. */
+    if (available_mb >= 128) g_budget_mb = available_mb;
+}
+
+long pl_models_budget(void) { return g_budget_mb; }
 
 /* A new turn plus the chat template, in tokens. Everything before it is
  * already in the KV cache, which is the whole reason the cache is kept. */
@@ -49,16 +70,30 @@ typedef struct {
     const char *licence;
 } known;
 
-/* Only models that have actually been run on this hardware. Anything else
- * still appears in the list, described by its size alone. */
+/* Only models that have actually been run and read. The notes are what each
+ * one did on the same three questions -- an explanation, a piece of fiction,
+ * and a fact -- not what its card claims. Anything not listed here still
+ * appears in the picker, described by its size alone.
+ *
+ * The ordering below is search order, not display order. */
 static const known KNOWN[] = {
-    { "qwen2.5-1.5b", "Qwen2.5 1.5B",  "Much better, and far too big for this device.", "Apache-2.0" },
-    { "qwen2.5-0.5b", "Qwen2.5 0.5B",  "The best writer that fits. Holds a thread.",    "Apache-2.0" },
-    { "qwen2.5-3b",   "Qwen2.5 3B",    "Desktop only.",                                 "Apache-2.0" },
-    { "smollm2-360m", "SmolLM2 360M",  "Quick and solid on facts. Embellishes freely.", "Apache-2.0" },
-    { "smollm2-135m", "SmolLM2 135M",  "Nearly instant. Simple answers, often wrong.",  "Apache-2.0" },
-    { "gemma-3-270m", "Gemma 3 270M",  "Fast, but repeats itself within a paragraph.",  "Gemma terms" },
-    { "lfm2-350m",    "LFM2 350M",     "Fluent and confidently wrong.",                 "LFM licence" },
+    { "qwen2.5-0.5b", "Qwen2.5 0.5B",
+      "The most accurate, and the only one that stops when it is done.", "Apache-2.0" },
+    { "smollm2-360m", "SmolLM2 360M",
+      "Clear explanations. Repeats whole sentences in longer answers.",  "Apache-2.0" },
+    { "smollm2-135m", "SmolLM2 135M",
+      "Quick, and readable. Gets facts right and details invented.",     "Apache-2.0" },
+    { "lfm2-350m",    "LFM2 350M",
+      "The best writer here, and the most confidently wrong.",           "LFM licence" },
+    { "gemma-3-270m", "Gemma 3 270M",
+      "Brief and obedient. Says little, but rarely rambles.",            "Gemma terms" },
+
+    /* Listed so that someone who copies one over is told why it will not run,
+     * rather than left wondering whether the file is corrupt. */
+    { "qwen3-",       "Qwen3 0.6B",
+      "Thinks out loud for a minute, then runs out of budget. Not here.", "Apache-2.0" },
+    { "qwen2.5-1.5b", "Qwen2.5 1.5B",  "Far too big for a Kindle.",       "Apache-2.0" },
+    { "llama-3.2-1b", "Llama 3.2 1B",  "Far too big for a Kindle.",       "Llama licence" },
 };
 
 static void title_from_file(const char *file, char *out, size_t cap) {
@@ -118,10 +153,10 @@ void pl_model_describe(const char *filename, long bytes, pl_model_info *out) {
     if (pp > PP_CAP_X100) pp = PP_CAP_X100;
     out->pp_x100 = (int)pp;
 
-    int peak = mb + OVERHEAD_MB;
-    out->fit = peak > CEILING_MB ? PL_FIT_NO
-             : peak > TIGHT_MB   ? PL_FIT_TIGHT
-                                 : PL_FIT_COMFORTABLE;
+    long peak = mb + OVERHEAD_MB;
+    out->fit = peak > g_budget_mb - MARGIN_MB  ? PL_FIT_NO
+             : peak > g_budget_mb - RESERVE_MB ? PL_FIT_TIGHT
+                                               : PL_FIT_COMFORTABLE;
 }
 
 int pl_model_seconds(const pl_model_info *m, int gen_tokens) {
