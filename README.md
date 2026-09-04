@@ -27,10 +27,11 @@ Measured on a 12th-generation Paperwhite, not read off a spec sheet:
 | CPU | MediaTek MT8113, two Cortex-A53 cores, **32-bit kernel** |
 | RAM | 512 MB, **no swap** |
 | Screen | 8bpp greyscale e-ink, ~100 ms partial refresh, ~500 ms full |
-| Model | Qwen2.5-0.5B at Q4_K_M — 384 MB on disk, ~470 MB resident |
-| Speed | ~5 tokens/second generating, ~8 evaluating the prompt |
+| Measured | Gemma-3-270M: **5.52 tok/s** generating, 8.64 evaluating |
 
-A reply of a hundred words takes about half a minute. That is the deal.
+A reply of a hundred words takes somewhere between ten seconds and a minute,
+depending on which model you pick. That is the deal, and the app is honest
+about it.
 
 Two of those numbers explain most of the code:
 
@@ -46,26 +47,66 @@ prompt (8 t/s) is barely faster than generating (5 t/s), when the usual ratio is
 10–50×. There is no flag that fixes it; writing ARMv7 NEON kernels is real,
 unclaimed upstream work.
 
+## You pick the model
+
+Generation here is memory-bandwidth bound: every token reads the whole model,
+so **size is speed**, exactly. That makes the model choice the most
+consequential thing on the device — and it is a real trade, not an obvious win
+— so it gets a screen rather than a config file. Tap the model name at the top.
+
+![choosing a model](docs/models.png)
+
+Each row shows what it will actually cost you. The times start as estimates
+derived from the one measured point above, scaled by file size; **the first
+time a model answers on your device, its real rate replaces the estimate** and
+the row says `measured here`.
+
+The one that loads by default is the one with the most memory headroom, not the
+cleverest. A model killed for memory halfway through a reply is a worse first
+experience than a slightly worse writer, and the better one is one tap away on
+a screen that says plainly what it costs.
+
+Drop any other `.gguf` into `extensions/pocketllm/models/` and it appears in the
+list, sized and timed from its own bytes.
+
 ## Build it
 
+One script. It checks your tools, fetches everything, cross-compiles, and lays
+out a folder you copy straight onto the Kindle:
+
 ```sh
-make deps                       # fonts, stb_truetype, llama.cpp (pinned)
-sh tools/fetch-models.sh dist/pocketllm    # ~384 MB, Apache-2.0
-make package                    # cross-compiles and assembles dist/pocketllm
+./build.sh
 ```
 
-Then follow [INSTALL.md](INSTALL.md).
+```
+dist/COPY-TO-KINDLE/
+    documents/shortcut_pocketllm.sh
+    extensions/pocketllm/
+        pocketllm              3.9 MB, static, no dependencies
+        models/                the models you chose
+        Literata.ttf  Inter.ttf  OFL-*.txt
+```
 
-You need `zig` (the cross-compiler — no toolchain to install), `cmake`, and
-`curl`. `sh tools/fetch-models.sh --help` lists the other models and what each
-one costs you in memory and coherence.
+Copy those two folders onto the Kindle's drive and open KUAL. That is the whole
+installation — see [INSTALL.md](INSTALL.md).
+
+```sh
+./build.sh all        # every model that fits on the device
+./build.sh smol360    # just one
+./build.sh none       # the app alone
+```
+
+You need `zig` (the cross-compiler — there is no ARM toolchain to set up
+besides it), `cmake`, `curl`, `git` and `make`. `build.sh` checks for all of
+them before it downloads anything.
 
 ## Work on it without a Kindle
 
 ```sh
 make test        # layout and transcript, under a second
 make screens     # every screen as a PNG at true panel size
-make ask dist/pocketllm/model.gguf "hello" "now say that in French"
+make ask && ./out/ask dist/COPY-TO-KINDLE/extensions/pocketllm/models/*0.5B*.gguf \
+      "hello" "now say that in French"
 ```
 
 `make screens` runs the *same drawing code* the device runs, against a memory
@@ -81,6 +122,7 @@ in twenty minutes that no amount of reasoning about prompts had.
 
 ```
 app/       chat.c      the transcript; fixed pool, drops oldest turns
+           models.c    what is installed, what each costs, what it really did
            screens.c   drawing and hit tests, one geometry function each
            main.c      the event loop -- the only device-only file
 model/     model_llama.c   llama.cpp; model_none.c   the same API, no model

@@ -151,8 +151,7 @@ int pl_chat_reply(pl_chat *c, pl_chat_progress on_token, void *user) {
         pl_chat_add(c, 0, c->pending);
         c->pending[0] = 0;
         c->pending_len = 0;
-        return 1;
+        return produced > 0 ? produced : 1;
     }
-    (void)produced;
     return 0;
 }

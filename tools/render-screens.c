@@ -54,6 +54,17 @@ int main(void) {
     pl_screen_keyboard(ui, "Convert 350 F to C, and show the working.", 0, 1);
     pl_ui_host_save(ui, "keyboard-symbols");
 
+    /* The picker, with the three that fit and one that does not -- the
+     * "too big" row is exactly the case worth looking at. */
+    pl_model_info models[4];
+    pl_model_describe("Qwen2.5-0.5B-Instruct-Q4_K_M.gguf", 380L << 20, &models[0]);
+    pl_model_describe("SmolLM2-360M-Instruct-Q4_K_M.gguf", 270L << 20, &models[1]);
+    pl_model_describe("SmolLM2-135M-Instruct-Q4_K_M.gguf", 110L << 20, &models[2]);
+    pl_model_describe("Qwen2.5-1.5B-Instruct-Q4_K_M.gguf", 1100L << 20, &models[3]);
+    models[1].measured = 1;        /* one row showing a real, timed rate */
+    pl_screen_models(ui, models, 4, 0);
+    pl_ui_host_save(ui, "models");
+
     pl_screen_notice(ui, "No model installed.",
                      "Run tools/fetch-models.sh on a computer, then copy "
                      "model.gguf into extensions/pocketllm on this Kindle.");

@@ -5,7 +5,7 @@
 #   make screens     render every screen to PNGs at device size
 #   make app         the ARM binary, no model  (links in seconds)
 #   make app-model   the ARM binary with llama.cpp -- what you install
-#   make package     assemble dist/ ready to copy to the Kindle
+#   make package     the lot: ./build.sh, ready to copy to the Kindle
 #   make abi         assert the ELF matches the Kindle's contract
 
 CC     ?= cc
@@ -32,7 +32,7 @@ LLAMA_LIBS := $(LLAMA_BUILD)/src/libllama.a \
 PLATFORM_HOST := platform/draw.c platform/host/ui_host.c
 PLATFORM_ARM  := platform/draw.c platform/kindle/ui_fb.c \
                  platform/kindle/input_evdev.c platform/devroot.c
-APP_SRC       := app/main.c app/chat.c app/screens.c
+APP_SRC       := app/main.c app/chat.c app/models.c app/screens.c
 
 .PHONY: all deps test screens app app-model llama package abi ask clean
 all: test
@@ -47,13 +47,16 @@ deps:
 # Both of these are pure functions given real inputs. They are fast because
 # they have to be run on every change: the keyboard has already shipped once
 # with two keys drawn off the right edge of the screen.
-$(OUT)/t_layout: tests/test_layout.c app/screens.c $(PLATFORM_HOST) | $(OUT)
+$(OUT)/t_layout: tests/test_layout.c app/screens.c app/models.c $(PLATFORM_HOST) | $(OUT)
 	@$(CC) $(CFLAGS) -o $@ $^
 
 $(OUT)/t_chat: tests/test_chat.c app/chat.c model/model_none.c | $(OUT)
 	@$(CC) $(CFLAGS) -o $@ $^
 
-test: $(OUT)/t_layout $(OUT)/t_chat
+$(OUT)/t_models: tests/test_models.c app/models.c | $(OUT)
+	@$(CC) $(CFLAGS) -o $@ $^
+
+test: $(OUT)/t_layout $(OUT)/t_chat $(OUT)/t_models
 	@fail=0; for t in $^; do ./$$t || fail=1; done; \
 	 [ $$fail -eq 0 ] && echo "PASS" || { echo "FAIL"; exit 1; }
 
@@ -64,7 +67,7 @@ screens: | $(OUT)
 	@test -s assets/fonts/Literata.ttf || { echo "run: make deps"; exit 1; }
 	@mkdir -p $(OUT)/screens
 	@$(CC) -std=c11 -Wall -O1 -o $(OUT)/render tools/render-screens.c \
-	   app/screens.c $(PLATFORM_HOST)
+	   app/screens.c app/models.c $(PLATFORM_HOST)
 	@./$(OUT)/render
 	@echo "wrote $(OUT)/screens/*.png"
 
@@ -108,22 +111,11 @@ abi:
 	@sh tools/check-abi.sh $(OUT)/pocketllm
 
 # --- packaging -------------------------------------------------------------
-# The model is NOT copied here. It is hundreds of megabytes and carries its own
-# licence; tools/fetch-models.sh puts it in place, and .gitignore keeps it out
-# of the repository.
-PKG := dist/pocketllm
-package: app-model
-	@mkdir -p $(PKG)
-	@cp $(OUT)/pocketllm $(PKG)/
-	@cp assets/fonts/Literata.ttf assets/fonts/Inter.ttf $(PKG)/
-	@cp assets/fonts/OFL-*.txt $(PKG)/
-	@echo
-	@echo "package: $(PKG)"
-	@test -s $(PKG)/model.gguf \
-	  && echo "model:   $(PKG)/model.gguf ($$(du -h $(PKG)/model.gguf | cut -f1))" \
-	  || echo "model:   MISSING -- run: sh tools/fetch-models.sh $(PKG)"
-	@echo
-	@echo "then follow INSTALL.md"
+# One path, so there is nothing to keep in sync: ./build.sh checks the tools,
+# fetches what is missing, builds, downloads the models and lays out
+# dist/COPY-TO-KINDLE ready to copy onto the device.
+package:
+	@sh build.sh $(MODELS)
 
 clean:
 	@rm -rf $(OUT)

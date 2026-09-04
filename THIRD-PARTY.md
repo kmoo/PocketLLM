@@ -14,14 +14,15 @@ stays small and unencumbered.
 | **Qwen2.5-0.5B-Instruct** (GGUF) | Apache-2.0 | Alibaba Cloud, quantised by bartowski |
 | **SmolLM2** (GGUF) | Apache-2.0 | Hugging Face, quantised by bartowski |
 
-`fetch-deps.sh` also fetches each font's `OFL.txt`, and `make package` copies
-those next to the fonts, because OFL 1.1 requires the licence to travel with
-the font files.
+`fetch-deps.sh` also fetches each font's `OFL.txt`, and `build.sh` copies those
+next to the fonts, because OFL 1.1 requires the licence to travel with the font
+files.
 
 ## Models we deliberately do not offer
 
 `tools/fetch-models.sh` only offers Apache-2.0 models. Two that run perfectly
-well on this hardware are left out on purpose:
+well on this hardware are left out on purpose — though the app lists whatever
+`.gguf` files it finds, so adding either yourself takes a file copy:
 
 - **Gemma** (Google). Not an open-source licence. The Gemma Terms of Use carry
   a use-restriction policy and require you to pass those terms on to anyone you

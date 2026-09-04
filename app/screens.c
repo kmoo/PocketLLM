@@ -53,14 +53,35 @@ int pl_hit_close(int x, int y) {
     return x > cx - r && x < cx + r && y > cy - r;
 }
 
+/* The model label doubles as the way into the picker, so choosing a model
+ * needs no chrome of its own -- and the thing you tap is the thing you are
+ * changing. Drawn in a pill so it reads as a control rather than a caption. */
+#define MODEL_TAB_W  S(300)
+
+static pl_rect model_tab(void) {
+    int h = SMIN(58, 44);
+    pl_rect r = { PL_SCREEN_W - PAD - SMIN(46, 34) * 2 - S(20) - MODEL_TAB_W,
+                  TOP_H / 2 - h / 2, MODEL_TAB_W, h };
+    return r;
+}
+
+int pl_hit_model(int x, int y) {
+    if (y >= TOP_H || pl_hit_close(x, y)) return 0;
+    pl_rect r = model_tab();
+    return x >= r.x && x < r.x + r.w;
+}
+
 static void top_bar(pl_ui *ui, const char *model_name) {
     pl_ui_text(ui, PL_FONT_SANS_BOLD, F_TITLE, PAD, TOP_H / 2 + F_TITLE / 3,
                "PocketLLM", INK);
     if (model_name && *model_name) {
+        pl_rect r = model_tab();
+        pl_ui_round_rect(ui, r, r.h / 2, 2, 0xD8, 0);
         int w = pl_ui_text_width(ui, PL_FONT_SANS, F_TINY, model_name);
+        int cap = r.w - S(30);
         pl_ui_text(ui, PL_FONT_SANS, F_TINY,
-                   PL_SCREEN_W - PAD - SMIN(46, 34) * 2 - S(24) - w,
-                   TOP_H / 2 + F_TINY / 3, model_name, FAINT);
+                   r.x + (r.w - (w < cap ? w : cap)) / 2,
+                   r.y + r.h / 2 + F_TINY / 3, model_name, MID);
     }
     pl_ui_hline(ui, 0, TOP_H, PL_SCREEN_W, RULE);
     close_button(ui);
@@ -350,6 +371,123 @@ int pl_keyboard_hit(int x, int y, int shift, int page) {
         }
     }
     return 0;
+}
+
+/* ---- choosing a model -------------------------------------------------- */
+
+#define ROW_H     SMIN(210, 158)
+#define ROWS_TOP  (TOP_H + S(120))
+
+/* How many rows the panel has room for. Below this the list is truncated and
+ * says so -- a model that is installed but invisible would read as a copy that
+ * failed. There is no scrolling here on purpose: the list is short by
+ * construction, and a device with 512 MB has room for a handful of models at
+ * most before the drive is the problem. */
+static size_t rows_shown(size_t n) {
+    size_t room = (size_t)((PL_SCREEN_H - S(120) - ROWS_TOP) / ROW_H);
+    return n < room ? n : room;
+}
+
+int pl_models_hit(int x, int y, size_t n) {
+    (void)x;
+    if (y < ROWS_TOP) return -1;
+    int i = (y - ROWS_TOP) / ROW_H;
+    return (i >= 0 && (size_t)i < rows_shown(n)) ? i : -1;
+}
+
+static void seconds_label(int secs, char *out, size_t cap) {
+    /* "about 2 minutes" beats "127 s" when the point is to decide whether you
+     * are willing to wait for it. */
+    if (secs < 90) snprintf(out, cap, "%ds", secs);
+    else           snprintf(out, cap, "%dm %02ds", secs / 60, secs % 60);
+}
+
+void pl_screen_models(pl_ui *ui, const pl_model_info *m, size_t n, int current) {
+    pl_ui_clear(ui, WHITE);
+    top_bar(ui, NULL);
+
+    pl_ui_text(ui, PL_FONT_SERIF, SMIN(46, 30), PAD, TOP_H + S(72),
+               "Choose a model", BLACK);
+
+    if (!n) {
+        pl_rect b = { PAD, TOP_H + S(180), PL_SCREEN_W - PAD * 2, S(300) };
+        pl_ui_text_box(ui, PL_FONT_SANS, F_SMALL, b, SMIN(46, 30), PL_ALIGN_LEFT,
+                       "No models found. Run build.sh on a computer and copy "
+                       "the models folder into extensions/pocketllm.", MID, 1);
+        return;
+    }
+
+    size_t shown = rows_shown(n);
+    for (size_t i = 0; i < shown; i++) {
+        int top = ROWS_TOP + (int)i * ROW_H;
+
+        int chosen = ((int)i == current);
+        if (chosen) {
+            /* The one in use is filled rather than ticked: on e-ink a small
+             * mark at arm's length is easy to miss, a block of tone is not. */
+            pl_rect band = { PAD - S(18), top + S(6),
+                             PL_SCREEN_W - (PAD - S(18)) * 2, ROW_H - S(20) };
+            pl_ui_round_rect(ui, band, S(18), 0, 0xF0, 1);
+        }
+
+        /* A model too big to load is listed, dimmed, and says why -- rather
+         * than hidden, which would look like the file failed to copy. */
+        int dead = (m[i].fit == PL_FIT_NO);
+        uint8_t head = dead ? 0xA6 : BLACK;
+        uint8_t body = dead ? 0xBA : MID;
+
+        pl_ui_text(ui, PL_FONT_SANS_BOLD, SMIN(38, 25), PAD, top + S(52),
+                   m[i].name, head);
+
+        char right[48], sub[160];
+        if (dead) {
+            snprintf(right, sizeof right, "%s", "too big");
+        } else {
+            char t[24];
+            seconds_label(pl_model_seconds(&m[i], 60), t, sizeof t);
+            snprintf(right, sizeof right, "~%s", t);
+        }
+        int rw = pl_ui_text_width(ui, PL_FONT_SANS, SMIN(40, 26), right);
+        pl_ui_text(ui, PL_FONT_SANS, SMIN(40, 26), PL_SCREEN_W - PAD - rw,
+                   top + S(52), right, head);
+
+        if (!dead) {
+            const char *unit = m[i].measured ? "a short reply, measured here"
+                                             : "a short reply, estimated";
+            int uw = pl_ui_text_width(ui, PL_FONT_SANS, F_TINY, unit);
+            pl_ui_text(ui, PL_FONT_SANS, F_TINY, PL_SCREEN_W - PAD - uw,
+                       top + S(88), unit, body);
+        }
+
+        snprintf(sub, sizeof sub, "%ld MB  ·  %s%s",
+                 m[i].bytes / (1024 * 1024), m[i].licence,
+                 m[i].fit == PL_FIT_TIGHT ? "  ·  tight on memory" : "");
+        pl_ui_text(ui, PL_FONT_SANS, F_TINY, PAD, top + S(88), sub, body);
+
+        pl_rect nb = { PAD, top + S(104), PL_SCREEN_W - PAD * 2 - S(340), S(80) };
+        pl_ui_text_box(ui, PL_FONT_SERIF, SMIN(32, 21), nb, SMIN(42, 28),
+                       PL_ALIGN_LEFT,
+                       dead ? "Needs more memory than this Kindle has."
+                            : m[i].note, body, 1);
+
+        if (i + 1 < shown) pl_ui_hline(ui, PAD, top + ROW_H - S(8),
+                                       PL_SCREEN_W - PAD * 2, RULE);
+    }
+
+    if (shown < n) {
+        char more[80];
+        snprintf(more, sizeof more,
+                 "%zu more installed than fit on this screen.", n - shown);
+        pl_ui_text(ui, PL_FONT_SANS, F_TINY, PAD,
+                   ROWS_TOP + (int)shown * ROW_H + S(40), more, FAINT);
+    }
+
+    /* The one number that surprises people: the first reply in a conversation
+     * evaluates the whole history, every later one only the newest turn. */
+    pl_rect foot = { PAD, PL_SCREEN_H - S(110), PL_SCREEN_W - PAD * 2, S(90) };
+    pl_ui_text_box(ui, PL_FONT_SANS, F_TINY, foot, SMIN(38, 25), PL_ALIGN_LEFT,
+                   "The first reply after switching takes longer — the whole "
+                   "conversation has to be read in once.", FAINT, 1);
 }
 
 /* ---- notice ------------------------------------------------------------ */

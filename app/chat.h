@@ -52,7 +52,10 @@ typedef int (*pl_chat_progress)(pl_chat *c, void *user);
 
 /* Generate the next assistant turn for whatever is in the transcript, calling
  * `on_token` after each piece so the caller can redraw and check for a tap.
- * Commits the result as a turn. Returns 1 if anything was produced. */
+ * Commits the result as a turn.
+ *
+ * Returns the number of tokens produced, which is 0 for a failure and is also
+ * how the caller measures this device's real generation rate. */
 int  pl_chat_reply(pl_chat *c, pl_chat_progress on_token, void *user);
 
 /* A view of the transcript for the renderer, including the in-flight reply. */

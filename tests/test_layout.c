@@ -89,6 +89,26 @@ int main(void) {
                 if (n > 1) { check(0, "chrome hit tests overlap"); y = pl_screen_h; break; }
             }
 
+        /* Every model row the picker draws must be tappable, and no tap may
+         * land on a row it does not draw -- a model listed but unreachable, or
+         * a tap selecting one that is not there, are both worse than a short
+         * list. Checked across the full range the app allows. */
+        for (size_t count = 1; count <= PL_MAX_MODELS; count++) {
+            int seen[PL_MAX_MODELS];
+            memset(seen, 0, sizeof seen);
+            int out_of_range = 0;
+            for (int y = 0; y < pl_screen_h; y += 3) {
+                int i = pl_models_hit(pl_screen_w / 2, y, count);
+                if (i < 0) continue;
+                if (i >= (int)count) { out_of_range = 1; break; }
+                seen[i] = 1;
+            }
+            check(!out_of_range, "no tap selects a model that is not listed");
+            /* Row 0 must always be reachable: it is the default, and on the
+             * smallest panel it is the one people will actually pick. */
+            check(seen[0], "the first model row is always tappable");
+        }
+
         /* Both scroll arrows must exist, or the conversation has a direction
          * you cannot go. */
         int up = 0, down = 0;

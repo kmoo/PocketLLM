@@ -9,6 +9,7 @@
 
 #include "../platform/ui.h"
 #include "ui_types.h"
+#include "models.h"
 
 /* The conversation. `scroll` is how far down it is scrolled in pixels; the
  * total height comes back through `out_height` so the caller can bound it.
@@ -40,8 +41,20 @@ void pl_screen_keyboard(pl_ui *ui, const char *typed, int shift, int page);
  * apart; tests/test_layout.c checks that every drawn key is reachable. */
 int  pl_keyboard_hit(int x, int y, int shift, int page);
 
+/* Choosing a model. This is the most consequential decision on the device --
+ * it is the difference between a reply in eight seconds and one in a minute --
+ * so it gets a screen rather than a settings line, and every option shows what
+ * it costs. `current` is the index in use, or -1. */
+void pl_screen_models(pl_ui *ui, const pl_model_info *m, size_t n, int current);
+
+/* Which model row is under a tap, or -1. */
+int  pl_models_hit(int x, int y, size_t n);
+
 /* Chrome hit tests. */
 int  pl_hit_close(int x, int y);
+
+/* The model's name in the top bar: tapping it opens the picker. */
+int  pl_hit_model(int x, int y);
 int  pl_hit_composer(int x, int y);
 int  pl_hit_scroll(int x, int y);    /* -1 up, 1 down, 0 neither */
 int  pl_hit_stop(int x, int y);      /* the stop button, while generating */

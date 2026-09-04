@@ -6,6 +6,7 @@
  * host renderer, so this file is the only genuinely device-only part.
  */
 #include "chat.h"
+#include "models.h"
 #include "screens.h"
 #include "../platform/ui.h"
 #include "../platform/input.h"
@@ -78,7 +79,7 @@ static void install_handlers(void) {
 
 /* --- the running app ---------------------------------------------------- */
 
-typedef enum { MODE_CHAT, MODE_KEYBOARD } mode;
+typedef enum { MODE_CHAT, MODE_KEYBOARD, MODE_MODELS } mode;
 
 typedef struct {
     pl_ui    *ui;
@@ -91,13 +92,43 @@ typedef struct {
     char  typed[4096];
     size_t typed_len;
 
-    const char *model_label;
+    /* Every .gguf found beside the binary, and which one is loaded. */
+    pl_model_info models[PL_MAX_MODELS];
+    size_t        n_models;
+    int           current;          /* index into models, or -1 */
+    char          dir[512];
+    const char   *model_label;
 
     /* Streaming bookkeeping. */
     long  last_draw;
     int   tick;
     int   stop_requested;
 } app;
+
+/* Load one model by index, replacing whatever is loaded now.
+ *
+ * Closed before the new one is opened, always: two sets of weights do not fit
+ * in 512 MB, and the failure mode of trying is the kernel killing the app
+ * rather than an error we could report. */
+static int load_model(app *a, int idx) {
+    if (a->chat.model) { pl_model_close(a->chat.model); a->chat.model = NULL; }
+    a->current = -1;
+    a->model_label = "no model";
+
+    if (idx < 0 || (size_t)idx >= a->n_models) return 0;
+
+    long t0 = now_ms();
+    pl_model *m = pl_model_open(a->models[idx].path, 2, 2048);
+    logf_("load %s: %s in %ldms", a->models[idx].file, m ? "ok" : "FAILED",
+          now_ms() - t0);
+    if (!m) return 0;
+
+    a->chat.model  = m;
+    a->current     = idx;
+    a->model_label = a->models[idx].name;
+    pl_models_save_choice(a->dir, a->models[idx].file);
+    return 1;
+}
 
 static size_t view(app *a, pl_message *msgs, size_t cap) {
     return pl_chat_messages(&a->chat, msgs, cap);
@@ -171,16 +202,28 @@ static void send_message(app *a) {
 
     if (!pl_model_available(a->chat.model)) {
         pl_chat_add(&a->chat, 0,
-                    "No model is installed. Run tools/fetch-models.sh on a "
-                    "computer and copy the .gguf file into the pocketllm "
-                    "folder on this Kindle.");
+                    "No model is loaded. Run ./build.sh on a computer and copy "
+                    "the pocketllm folder into extensions on this Kindle — or "
+                    "tap the model name at the top to choose one that is "
+                    "already here.");
     } else {
         a->stop_requested = 0;
         a->last_draw = now_ms();
         long t0 = now_ms();
         int got = pl_chat_reply(&a->chat, on_token, a);
-        logf_("reply: produced=%d stopped=%d in %ldms",
-              got, a->stop_requested, now_ms() - t0);
+        long ms = now_ms() - t0;
+        logf_("reply: produced=%d stopped=%d in %ldms", got, a->stop_requested, ms);
+
+        /* Replace the estimate with what this device actually did. Only a
+         * reply long enough to average out the loading and the first token
+         * says anything useful about the rate. */
+        if (got >= 20 && ms > 0 && a->current >= 0) {
+            int tg_x100 = (int)((long)got * 100000 / ms);
+            a->models[a->current].tg_x100  = tg_x100;
+            a->models[a->current].measured = 1;
+            pl_models_record_speed(a->dir, a->models[a->current].file, tg_x100);
+        }
+
         if (!got && !a->stop_requested)
             pl_chat_add(&a->chat, 0, "I could not answer that one. Try asking "
                                      "it a different way, or start a new chat.");
@@ -217,21 +260,20 @@ int main(int argc, char **argv) {
     g_log = fopen(pl_path(LOGPATH, lp, sizeof lp), "a");
     logf_("--- pocketllm start, dir=%s ---", dir);
 
-    char serif[600], sans[600], gguf[600];
+    char serif[600], sans[600];
     snprintf(serif, sizeof serif, "%s/Literata.ttf", dir);
     snprintf(sans,  sizeof sans,  "%s/Inter.ttf",    dir);
-    snprintf(gguf,  sizeof gguf,  "%s/model.gguf",   dir);
 
     app a;
     memset(&a, 0, sizeof a);
+    a.current = -1;
+    a.model_label = "no model";
+    snprintf(a.dir, sizeof a.dir, "%s", dir);
 
     a.ui = pl_ui_fb_create(serif, sans);
     if (!a.ui) { logf_("cannot open the framebuffer -- giving up"); return 1; }
     g_ui = a.ui;
     install_handlers();
-
-    say("Loading…", "The model is about half a gigabyte, so the first screen "
-                    "takes a moment.");
 
     a.in = pl_input_open_sized(PL_SCREEN_W, PL_SCREEN_H);
     if (!a.in) {
@@ -246,24 +288,49 @@ int main(int argc, char **argv) {
         return 1;
     }
 
-    /* Two threads for two cores, and a context window sized to leave the
-     * weights room: at Q4 a 0.5B model is ~400 MB of the 512 MB available, and
-     * KV costs roughly 19 KB per token. 2048 is about 40 MB. */
-    long t0 = now_ms();
-    pl_model *m = pl_model_open(gguf, 2, 2048);
-    logf_("model: %s (%ldms)", m ? pl_model_name(m) : "none", now_ms() - t0);
+    /* What is installed, and which of them this device has actually timed. */
+    char models_dir[560];
+    snprintf(models_dir, sizeof models_dir, "%s/models", dir);
+    a.n_models = pl_models_scan(models_dir, a.models, PL_MAX_MODELS);
+    if (!a.n_models)   /* older layouts kept the .gguf beside the binary */
+        a.n_models = pl_models_scan(dir, a.models, PL_MAX_MODELS);
+    pl_models_load_speeds(dir, a.models, a.n_models);
+    logf_("found %zu model(s) in %s", a.n_models, models_dir);
 
-    pl_chat_init(&a.chat, m);
-    a.model_label = m ? pl_model_name(m) : "no model";
+    pl_chat_init(&a.chat, NULL);
     a.screen = MODE_CHAT;
 
-    if (!m) {
-        say("No model installed.",
-            "Run tools/fetch-models.sh on a computer, then copy model.gguf "
-            "into extensions/pocketllm on this Kindle. Tap to continue.");
+    if (!a.n_models) {
+        say("No models installed.",
+            "Run ./build.sh on a computer, then copy the pocketllm folder "
+            "into extensions on this Kindle.");
         pl_event ev;
-        do { ev = pl_input_next(a.in, 30000); } while (ev.kind == PL_EV_SWIPE_UP
-                                                    || ev.kind == PL_EV_SWIPE_DOWN);
+        do { ev = pl_input_next(a.in, 60000); }
+        while (ev.kind == PL_EV_SWIPE_UP || ev.kind == PL_EV_SWIPE_DOWN);
+    } else {
+        /* Whatever was chosen last time, if it is still installed; otherwise
+         * the first that will load, which the sort has already made the one
+         * with the most memory headroom rather than the cleverest. */
+        int pick = -1;
+        char want[160];
+        if (pl_models_load_choice(dir, want, sizeof want))
+            for (size_t i = 0; i < a.n_models; i++)
+                if (strcmp(a.models[i].file, want) == 0) { pick = (int)i; break; }
+        if (pick < 0)
+            for (size_t i = 0; i < a.n_models; i++)
+                if (a.models[i].fit != PL_FIT_NO) { pick = (int)i; break; }
+
+        if (pick >= 0) {
+            char line[160];
+            snprintf(line, sizeof line,
+                     "Reading %s off the drive. This part is slow; talking to "
+                     "it is not.", a.models[pick].name);
+            say("Loading…", line);
+            if (!load_model(&a, pick))
+                say("That model would not load.",
+                    "Tap to carry on, then tap the model name at the top to "
+                    "choose a different one.");
+        }
     }
 
     draw_chat(&a, PL_REFRESH_FULL, 0);
@@ -288,13 +355,44 @@ int main(int argc, char **argv) {
          * it reads as "still working". */
         pl_ui_tap_flash(a.ui, ev.x, ev.y);
 
-        if (pl_hit_close(ev.x, ev.y)) break;
+        if (pl_hit_close(ev.x, ev.y)) {
+            /* From a sub-screen the X goes back; from the chat it leaves. */
+            if (a.screen == MODE_CHAT) break;
+            a.screen = MODE_CHAT;
+            draw_chat(&a, PL_REFRESH_FULL, 0);
+            continue;
+        }
+
+        if (a.screen == MODE_MODELS) {
+            int pick = pl_models_hit(ev.x, ev.y, a.n_models);
+            if (pick < 0) continue;
+            if (a.models[pick].fit == PL_FIT_NO) continue;  /* listed, not loadable */
+            if (pick != a.current) {
+                char line[160];
+                snprintf(line, sizeof line, "Reading %s off the drive.",
+                         a.models[pick].name);
+                say("Switching…", line);
+                if (!load_model(&a, pick))
+                    say("That model would not load.",
+                        "Tap to carry on and pick a different one.");
+            }
+            a.screen = MODE_CHAT;
+            draw_chat(&a, PL_REFRESH_FULL, 0);
+            continue;
+        }
 
         if (a.screen == MODE_KEYBOARD) {
             key(&a, pl_keyboard_hit(ev.x, ev.y, a.shift, a.page));
             /* A quit that arrived while a reply was streaming is noticed here,
              * once the generation it interrupted has unwound. */
             if (a.stop_requested == 2) break;
+            continue;
+        }
+
+        if (pl_hit_model(ev.x, ev.y)) {
+            a.screen = MODE_MODELS;
+            pl_screen_models(a.ui, a.models, a.n_models, a.current);
+            pl_ui_present(a.ui, PL_REFRESH_FULL);
             continue;
         }
 
@@ -316,7 +414,7 @@ int main(int argc, char **argv) {
     logf_("--- exit ---");
     say("Closed.", "Tap the PocketLLM shortcut in your library to come back.");
     pl_input_close(a.in);
-    pl_model_close(m);
+    pl_model_close(a.chat.model);
     pl_ui_destroy(a.ui);
     if (g_log) fclose(g_log);
     return 0;

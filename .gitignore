@@ -13,8 +13,8 @@ assets/fonts/
 *.otf
 *.bin
 
-# The assembled package. Built by `make package`, and it contains a model.
-dist/pocketllm/
+# The assembled package. Built by ./build.sh, and it contains models.
+dist/COPY-TO-KINDLE/
 
 # Logs pulled off the device. These contain your prompts.
 *.log
