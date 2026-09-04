@@ -1,0 +1,24 @@
+# Build output
+out/
+*.o
+*.a
+
+# Fetched, never committed. All of it is someone else's work under its own
+# licence, and most of it is enormous. tools/fetch-deps.sh and
+# tools/fetch-models.sh put it back. See THIRD-PARTY.md.
+vendor/
+assets/fonts/
+*.gguf
+*.ttf
+*.otf
+*.bin
+
+# The assembled package. Built by `make package`, and it contains a model.
+dist/pocketllm/
+
+# Logs pulled off the device. These contain your prompts.
+*.log
+pocketllm-*.txt
+
+# macOS
+.DS_Store

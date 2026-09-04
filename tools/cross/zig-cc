@@ -1,0 +1,3 @@
+#!/bin/sh
+# CMake wants a compiler it can call as one binary. zig cc is two words.
+exec zig cc -target arm-linux-musleabihf -mcpu=generic+v7a+neon "$@"
