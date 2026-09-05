@@ -61,6 +61,9 @@ static void on_fatal(int sig) {
                      : sig == SIGFPE  ? "SIGFPE"  : sig == SIGABRT ? "SIGABRT"
                      : sig == SIGILL  ? "SIGILL"  : "signal";
     logf_("FATAL: %s", name);
+    /* This one does stay on the panel: a crash the reader never sees is a
+     * crash they cannot report, and the shortcut's redraw runs afterwards
+     * anyway. */
     say("Something went wrong.", "The details are in pocketllm.log at the top "
                                  "level of the Kindle's drive.");
     _exit(1);
@@ -459,8 +462,25 @@ int main(int argc, char **argv) {
         }
     }
 
+    /* Hand the panel back clean.
+     *
+     * The reader framework composites into /dev/fb0 and has no idea we drew
+     * over it, so it does not repaint when we quit -- whatever we leave on the
+     * panel stays there until something else forces a redraw, which is why the
+     * home screen came back looking half-finished. Two things follow from
+     * that. We must not leave a goodbye message, however polite, because it
+     * will sit on a stranger's home screen. And the last thing we do has to be
+     * a white GC16 full flash: it is the update that actually inverts the
+     * panel and clears the ghosting of everything we drew, and pl_ui_present
+     * waits for it to land before returning.
+     *
+     * The shortcut then asks the framework to redraw the home screen. If that
+     * does not work on this firmware, a clean white page is a calm thing to be
+     * left looking at, and the next tap brings the reader back. */
     logf_("--- exit ---");
-    say("Closed.", "Tap the PocketLLM shortcut in your library to come back.");
+    pl_ui_clear(a.ui, 0xFF);
+    pl_ui_present(a.ui, PL_REFRESH_FULL);
+
     pl_input_close(a.in);
     pl_model_close(a.chat.model);
     pl_ui_destroy(a.ui);

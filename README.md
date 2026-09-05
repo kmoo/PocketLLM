@@ -191,6 +191,12 @@ be reviewed as PNGs without a device.
   it that fast anyway.
 - **Big targets, and a scroll rail.** Swipes on an e-ink digitiser are
   unreliable enough that a target you cannot miss beats a scrollbar you can.
+- **Hand the panel back clean.** The reader framework composites into
+  `/dev/fb0` and does not know another program drew over it, so it will not
+  repaint when yours quits — whatever you leave sits on the user's home screen
+  until something forces a redraw. So: no goodbye message, a white GC16 full
+  flash as the last thing the app does, and the shortcut asks the framework to
+  redraw home afterwards.
 - **A tap that starts something is still arriving while it runs.** Tapping
   *send* left a tap queued at the bottom of the screen; the generating screen
   put *stop* in that same place; the first poll during generation read one as

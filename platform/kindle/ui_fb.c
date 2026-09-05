@@ -34,9 +34,15 @@ typedef struct {
 } fb_state;
 
 /* E-ink truth: a partial update is fast but leaves a faint trace of what was
- * there before. Streaming an answer means many partials in a row, so we force
- * a full flash periodically. Chosen empirically-ish; tune on device. */
-#define FULL_REFRESH_EVERY 12
+ * there before, so a run of partials needs a full flash eventually.
+ *
+ * "Eventually" is doing real work here. At 12, a thirty-second reply redrawn
+ * every 450ms flashed the panel black five times while the reader was trying
+ * to read it -- and every one of those was wasted, because the app already
+ * does a full refresh the moment a reply finishes. The counter only needs to
+ * catch a stream long enough that the end-of-reply flash is too far off, so it
+ * is set well above a normal reply's redraw count. */
+#define FULL_REFRESH_EVERY 40
 
 static void fb_present(pl_ui *ui, pl_refresh how) {
     fb_state *st = ui->backend;
